@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>База радиокомпонентов</title>
+    <!-- Подключаем PWA манифест и Service Worker -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#2563eb">
+    <script>
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('sw.js');
+      }
+    </script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/html5-qrcode"></script>
+</head>
+<body class="bg-slate-100 text-slate-800 min-h-screen pb-10">
+
+    <!-- Шапка -->
+    <header class="bg-blue-700 text-white p-4 shadow-md sticky top-0 z-10 flex justify-between items-center">
+        <h1 class="text-xl font-bold flex items-center gap-2">
+            <span>⚡</span> Склад Радиолюбителя
+        </h1>
+        <button onclick="exportCSV()" class="text-xs bg-blue-800 hover:bg-blue-900 px-3 py-1.5 rounded">Экспорт CSV</button>
+    </header>
+
+    <main class="max-w-4xl mx-auto p-4 space-y-6">
+
+        <!-- Блок камеры и добавления -->
+        <section class="bg-white p-5 rounded-xl shadow-sm border border-slate-200">
+            <h2 class="text-lg font-semibold mb-3">Добавить / Распознать компонент</h2>
+            
+            <!-- Кнопки камеры -->
+            <div class="grid grid-cols-2 gap-3 mb-4">
+                <button onclick="startQRScanner()" class="bg-indigo-600 text-white py-2.5 px-4 rounded-lg font-medium hover:bg-indigo-700 flex items-center justify-center gap-2 text-sm">
+                    📷 Скан QR / Штрих-кода
+                </button>
+                <label class="bg-emerald-600 text-white py-2.5 px-4 rounded-lg font-medium hover:bg-emerald-700 flex items-center justify-center gap-2 text-sm cursor-pointer text-center">
+                    🤖 Фото детали (AI OCR)
+                    <input type="file" accept="image/*" capture="environment" class="hidden" onchange="handlePhotoUpload(event)">
+                </label>
+            </div>
+
+            <!-- Видоискатель для QR -->
+            <div id="qr-reader" class="mb-4 hidden rounded-lg overflow-hidden border"></div>
+            <div id="ai-status" class="hidden text-sm text-emerald-700 bg-emerald-50 p-3 rounded-lg mb-4">
+                Анализируем фото компонента...
+            </div>
+
+            <!-- Форма характеристик -->
+            <form id="comp-form" onsubmit="saveComponent(event)" class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <input type="hidden" id="comp-id">
+                <div>
+                    <label class="block text-xs text-slate-500 mb-1">Наименование / Маркировка *</label>
+                    <input type="text" id="name" required placeholder="Напр: NE555P или 10k 0805" class="w-full border rounded-lg p-2 text-sm">
+                </div>
+                <div>
+                    <label class="block text-xs text-slate-500 mb-1">Категория</label>
+                    <select id="category" class="w-full border rounded-lg p-2 text-sm bg-white">
+                        <option value="Микросхемы">Микросхемы</option>
+                        <option value="Резисторы">Резисторы</option>
+                        <option value="Конденсаторы">Конденсаторы</option>
+                        <option value="Транзисторы">Транзисторы</option>
+                        <option value="Диоды">Диоды</option>
+                        <option value="Модули/Датчики">Модули и датчики</option>
+                        <option value="Разъемы/Прочее">Разъемы / Прочее</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs text-slate-500 mb-1">Корпус (Package)</label>
+                    <input type="text" id="package" placeholder="DIP-8, SMD 0805, TO-220" class="w-full border rounded-lg p-2 text-sm">
+                </div>
+                <div>
+                    <label class="block text-xs text-slate-500 mb-1">Количество (шт) *</label>
+                    <input type="number" id="qty" required value="1" min="0" class="w-full border rounded-lg p-2 text-sm">
+                </div>
+                <div>
+                    <label class="block text-xs text-slate-500 mb-1">Место хранения (Адрес) *</label>
+                    <input type="text" id="location" required placeholder="Кассета А -> Ячейка B4" class="w-full border rounded-lg p-2 text-sm font-medium text-blue-700">
+                </div>
+                <div>
+                    <label class="block text-xs text-slate-500 mb-1">Номинал / Примечание</label>
+                    <input type="text" id="notes" placeholder="100nF 50V, партия с AliExpress" class="w-full border rounded-lg p-2 text-sm">
+                </div>
+                <div class="sm:col-span-2 flex gap-2 pt-2">
+                    <button type="submit" class="w-full bg-blue-600 text-white py-2.5 rounded-lg font-medium hover:bg-blue-700">
+                        💾 Сохранить в базу
+                    </button>
+                </div>
+            </form>
+        </section>
+
+        <!-- Поиск и фильтрация -->
+        <section class="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex flex-col sm:flex-row gap-3">
+            <input type="text" id="search" oninput="renderInventory()" placeholder="🔍 Поиск по названию, корпусу или ячейке..." class="w-full border rounded-lg p-2 text-sm">
+            <select id="filter-category" onchange="renderInventory()" class="border rounded-lg p-2 text-sm bg-white sm:w-48">
+                <option value="">Все категории</option>
+                <option value="Микросхемы">Микросхемы</option>
+                <option value="Резисторы">Резисторы</option>
+                <option value="Конденсаторы">Конденсаторы</option>
+                <option value="Транзисторы">Транзисторы</option>
+                <option value="Диоды">Диоды</option>
+                <option value="Модули/Датчики">Модули и датчики</option>
+                <option value="Разъемы/Прочее">Разъемы / Прочее</option>
+            </select>
+        </section>
+
+        <!-- Список радиодеталей -->
+        <section id="inventory-list" class="space-y-3"></section>
+
+    </main>
+
+    <script>
+        let inventory = JSON.parse(localStorage.getItem('radio_inventory')) || [
+            { id: 1, name: 'ATmega328P-PU', category: 'Микросхемы', package: 'DIP-28', qty: 5, location: 'Шкаф 1 / Ячейка A1', notes: 'С загрузчиком Arduino' },
+            { id: 2, name: '10kΩ 1%', category: 'Резисторы', package: '0805', qty: 140, location: 'Альбом SMD / Стр. 3', notes: 'Лента' }
+        ];
+        let html5QrcodeScanner = null;
+
+        function saveToStorage() {
+            localStorage.setItem('radio_inventory', JSON.stringify(inventory));
+            renderInventory();
+        }
+
+        function saveComponent(e) {
+            e.preventDefault();
+            const id = document.getElementById('comp-id').value;
+            const item = {
+                id: id ? Number(id) : Date.now(),
+                name: document.getElementById('name').value.trim(),
+                category: document.getElementById('category').value,
+                package: document.getElementById('package').value.trim(),
+                qty: Number(document.getElementById('qty').value),
+                location: document.getElementById('location').value.trim(),
+                notes: document.getElementById('notes').value.trim()
+            };
+
+            if (id) {
+                const idx = inventory.findIndex(x => x.id === Number(id));
+                inventory[idx] = item;
+            } else {
+                inventory.unshift(item);
+            }
+
+            document.getElementById('comp-form').reset();
+            document.getElementById('comp-id').value = '';
+            saveToStorage();
+        }
+
+        function updateQty(id, delta) {
+            const item = inventory.find(x => x.id === id);
+            if (item) {
+                item.qty = Math.max(0, item.qty + delta);
+                saveToStorage();
+            }
+        }
+
+        function deleteItem(id) {
+            if(confirm('Удалить компонент из базы?')) {
+                inventory = inventory.filter(x => x.id !== id);
+                saveToStorage();
+            }
+        }
+
+        function renderInventory() {
+            const list = document.getElementById('inventory-list');
+            const q = document.getElementById('search').value.toLowerCase();
+            const cat = document.getElementById('filter-category').value;
+
+            const filtered = inventory.filter(item => {
+                const matchSearch = item.name.toLowerCase().includes(q) || 
+                                    item.location.toLowerCase().includes(q) || 
+                                    item.package.toLowerCase().includes(q) ||
+                                    item.notes.toLowerCase().includes(q);
+                const matchCat = cat === '' || item.category === cat;
+                return matchSearch && matchCat;
+            });
+
+            list.innerHTML = filtered.map(item => `
+                <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex justify-between items-center">
+                    <div>
+                        <div class="flex items-center gap-2">
+                            <span class="font-bold text-base text-slate-900">${item.name}</span>
+                            <span class="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded border">${item.package || 'Б/К'}</span>
+                            <span class="text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded">${item.category}</span>
+                        </div>
+                        <div class="text-sm text-indigo-700 font-medium mt-1">📍 ${item.location}</div>
+                        ${item.notes ? `<div class="text-xs text-slate-400 mt-0.5">${item.notes}</div>` : ''}
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button onclick="updateQty(${item.id}, -1)" class="w-8 h-8 rounded bg-slate-100 hover:bg-slate-200 font-bold">-</button>
+                        <span class="w-10 text-center font-semibold ${item.qty === 0 ? 'text-red-500' : ''}">${item.qty}</span>
+                        <button onclick="updateQty(${item.id}, 1)" class="w-8 h-8 rounded bg-slate-100 hover:bg-slate-200 font-bold">+</button>
+                        <button onclick="deleteItem(${item.id})" class="ml-2 text-slate-300 hover:text-red-500 text-sm">✖</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function startQRScanner() {
+            const readerEl = document.getElementById('qr-reader');
+            readerEl.classList.toggle('hidden');
+            if (readerEl.classList.contains('hidden')) {
+                if (html5QrcodeScanner) html5QrcodeScanner.clear();
+                return;
+            }
+            html5QrcodeScanner = new Html5QrcodeScanner("qr-reader", { fps: 10, qrbox: {width: 250, height: 150} });
+            html5QrcodeScanner.render((decodedText) => {
+                if (decodedText.includes('pm:')) {
+                    const matchName = decodedText.match(/pm:([^,]+)/);
+                    const matchQty = decodedText.match(/qty:(\d+)/);
+                    if (matchName) document.getElementById('name').value = matchName[1];
+                    if (matchQty) document.getElementById('qty').value = matchQty[1];
+                    document.getElementById('notes').value = `Код: ${decodedText}`;
+                } else {
+                    document.getElementById('name').value = decodedText;
+                }
+                html5QrcodeScanner.clear();
+                readerEl.classList.add('hidden');
+            });
+        }
+
+        async function handlePhotoUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const status = document.getElementById('ai-status');
+            status.classList.remove('hidden');
+
+            const reader = new FileReader();
+            reader.onloadend = async () => {
+                try {
+                    const response = await fetch('http://localhost:8000/recognize', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ image_base64: reader.result.split(',')[1] })
+                    });
+                    const data = await response.json();
+                    
+                    document.getElementById('name').value = data.name || '';
+                    document.getElementById('category').value = data.category || 'Микросхемы';
+                    document.getElementById('package').value = data.package || '';
+                    document.getElementById('notes').value = data.notes || '';
+                } catch (err) {
+                    alert('Демо-режим: Бэкенд ИИ не запущен на localhost:8000. Заполняем тестовыми данными с фото!');
+                    document.getElementById('name').value = 'LM358N';
+                    document.getElementById('category').value = 'Микросхемы';
+                    document.getElementById('package').value = 'DIP-8';
+                    document.getElementById('notes').value = 'Двухканальный операционный усилитель (распознано по фото)';
+                } finally {
+                    status.classList.add('hidden');
+                }
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function exportCSV() {
+            const headers = ['ID,Наименование,Категория,Корпус,Количество,Место хранения,Примечание'];
+            const rows = inventory.map(i => `${i.id},"${i.name}","${i.category}","${i.package}",${i.qty},"${i.location}","${i.notes}"`);
+            const blob = new Blob(["\uFEFF" + headers.concat(rows).join('\n')], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = 'radio_inventory.csv';
+            link.click();
+        }
+
+        renderInventory();
+    </script>
+</body>
+</html>
